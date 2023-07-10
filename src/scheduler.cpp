@@ -103,17 +103,12 @@ bool Scheduler::schedule(Transaction *tr, Operation::Commit &commit, Lock::Resou
     if (it->tr->id == tr->id && it->status == Lock::Waiting)
       return false;
 
-  m_lockInfo.remove_if([tr](Lock& lock)
-  {
-    return lock.tr->id == tr->id && (lock.type == Lock::Read || lock.type == Lock::IRead);
-  });
-
-  auto waiting = m_graph.remove(tr->id);
-
+  int convertedCount = 0, totalCount = 0;
   for (auto& lock : m_lockInfo)
   {
     if (lock.tr->id == tr->id && (lock.type == Lock::Write || lock.type == Lock::IWrite))
     {
+      totalCount++;
       auto rit = std::find_if(m_lockInfo.begin(), m_lockInfo.end(), [&lock](Lock& l)
       {
         return
@@ -121,12 +116,28 @@ bool Scheduler::schedule(Transaction *tr, Operation::Commit &commit, Lock::Resou
           l.tr->id != lock.tr->id &&
           lock.table == l.table;
       });
-      lock.status = rit != m_lockInfo.end() ? Lock::Waiting : Lock::Granted;
+      if (rit != m_lockInfo.end())
+      {
+        lock.status = Lock::Waiting;
+      }
+      else
+      {
+        lock.status = Lock::Granted;
+        convertedCount++;
+      }
       lock.type = lock.type == Lock::Write ? Lock::Certify : Lock::ICertify;
-      if (lock.status == Lock::Waiting)
-        addWaitForEdge(tr, lock.tr);
     }
   }
+
+  if (convertedCount != totalCount)
+    return false;
+
+  m_lockInfo.remove_if([tr](Lock& lock)
+  {
+    return lock.tr->id == tr->id && (lock.type == Lock::Read || lock.type == Lock::IRead);
+  });
+
+  auto waiting = m_graph.remove(tr->id);
 
   for (auto id : waiting)
   {
